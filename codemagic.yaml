@@ -29,108 +29,122 @@ workflows:
                 echo "=== Looking for Cocos app ==="
                 COCOS_APP=$(find /Volumes/ -maxdepth 3 -name "*.app" 2>/dev/null | grep -i cocos | head -1)
                 if [ -z "$COCOS_APP" ]; then
-                    echo "ERROR: Cannot find Cocos Creator app"
-                    find /Volumes/ -maxdepth 3 -name "*.app" 2>/dev/null
+                    echo "ERROR: Cannot find Cocos Creator app in any mounted volume"
+                    find /Volumes/ -maxdepth 3 2>/dev/null
                     exit 1
                 fi
-                echo "Found: $COCOS_APP"
+                echo "Found app: $COCOS_APP"
 
                 echo "=== Copying to Applications ==="
                 cp -R "$COCOS_APP" /Applications/
 
                 COCOS_BASENAME=$(basename "$COCOS_APP")
                 COCOS_APP_TARGET="/Applications/${COCOS_BASENAME}"
-                echo "Installed app: $COCOS_APP_TARGET"
+                echo "Installed at: $COCOS_APP_TARGET"
 
                 echo "=== Unmounting dmg ==="
-                hdiutil detach "$(dirname "$COCOS_APP")" -quiet
+                VOLUME_PATH=$(dirname "$COCOS_APP")
+                hdiutil detach "$VOLUME_PATH" -quiet || true
 
-                COCOS_PATH="${COCOS_APP_TARGET}/Contents/MacOS/Cocos Creator"
-                if [ ! -f "$COCOS_PATH" ]; then
-                    COCOS_PATH="${COCOS_APP_TARGET}/Contents/MacOS/CocosCreator"
-                fi
-                if [ ! -f "$COCOS_PATH" ]; then
-                    ls "${COCOS_APP_TARGET}/Contents/MacOS/"
+                echo "=== Finding Cocos executable ==="
+                ls "${COCOS_APP_TARGET}/Contents/MacOS/"
+                COCOS_PATH=$(find "${COCOS_APP_TARGET}/Contents/MacOS/" -maxdepth 1 -type f | head -1)
+                if [ -z "$COCOS_PATH" ]; then
                     echo "ERROR: Cannot find Cocos Creator executable"
                     exit 1
                 fi
                 echo "COCOS_PATH=$COCOS_PATH" >> $CM_ENV
-                echo "=== Cocos Creator installed at: $COCOS_PATH ==="
+                echo "=== Cocos Creator installed: $COCOS_PATH ==="
 
             - name: Build iOS with Cocos Creator
               script: |
                 set -e
-                echo "=== Building iOS with Cocos Creator ==="
+                echo "=== Starting Cocos Creator iOS build ==="
+                echo "Project path: $CM_BUILD_DIR"
+                echo "Cocos path: $COCOS_PATH"
+
                 "$COCOS_PATH" \
                     --path "$CM_BUILD_DIR" \
-                    --build "platform=ios;debug=false;template=default;md5Cache=true" \
+                    --build "platform=ios;debug=false;template=default;md5Cache=false;encryptJs=true;xxteaKey=df124dde-c814-4b" \
                     2>&1 | tee /tmp/cocos-build.log
-                echo "=== Cocos build completed ==="
-                ls -la "$CM_BUILD_DIR/build/"
+
+                echo "=== Build completed, listing output ==="
+                find "$CM_BUILD_DIR/build" -name "*.xcodeproj" -maxdepth 6 2>/dev/null || echo "No xcodeproj found"
+                ls -la "$CM_BUILD_DIR/build/" 2>/dev/null || echo "No build directory"
 
             - name: Locate Xcode project
               script: |
                 set -e
                 echo "=== Searching for Xcode project ==="
-                PROJECT_FILE=$(find "$CM_BUILD_DIR/build" -name "*.xcodeproj" -maxdepth 4 | head -1)
+
+                PROJECT_FILE=$(find "$CM_BUILD_DIR/build" -name "*.xcodeproj" -maxdepth 6 | head -1)
                 if [ -z "$PROJECT_FILE" ]; then
                     echo "ERROR: No Xcode project found"
-                    find "$CM_BUILD_DIR/build" -name "*.xcodeproj" 2>/dev/null
-                    find "$CM_BUILD_DIR/build" -type d -maxdepth 5 2>/dev/null
+                    ls -la "$CM_BUILD_DIR/build/" 2>/dev/null
+                    find "$CM_BUILD_DIR/build" -maxdepth 6 -type d 2>/dev/null
                     exit 1
                 fi
                 echo "XCODE_PROJECT=$PROJECT_FILE" >> $CM_ENV
                 echo "Found: $PROJECT_FILE"
 
-                SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -E "^\s+-" | head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
+                echo "=== Listing available schemes ==="
+                xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null || true
+
+                SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -A 10 "Schemes:" | grep -v "Schemes:" | grep -v "^$" | head -1 | sed 's/^[[:space:]]*//')
+                if [ -z "$SCHEME_NAME" ]; then
+                    SCHEME_NAME="hall_split-mobile"
+                fi
                 echo "XCODE_SCHEME=$SCHEME_NAME" >> $CM_ENV
-                echo "Scheme: $SCHEME_NAME"
+                echo "Using scheme: $SCHEME_NAME"
 
             - name: Inject permissions and keys
               script: |
                 set -e
-                INFO_PLIST=$(find "$CM_BUILD_DIR/build" -name "Info.plist" -maxdepth 6 | grep -i "ios\|mobile" | head -1)
+                INFO_PLIST=$(find "$CM_BUILD_DIR/build" -name "Info.plist" -maxdepth 8 | grep -i "ios\|mobile" | head -1)
+                if [ -z "$INFO_PLIST" ]; then
+                    INFO_PLIST=$(find "$CM_BUILD_DIR/build" -name "Info.plist" -maxdepth 8 | head -1)
+                fi
                 echo "Info.plist: $INFO_PLIST"
 
-                if [ -f "$INFO_PLIST" ]; then
-                    echo "=== Injecting location permissions ==="
-                    /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 用于高德地图定位服务" "$INFO_PLIST" 2>/dev/null || \
-                    /usr/libexec/PlistBuddy -c "Set :NSLocationWhenInUseUsageDescription 用于高德地图定位服务" "$INFO_PLIST"
-
-                    /usr/libexec/PlistBuddy -c "Add :NSLocationAlwaysAndWhenInUseUsageDescription string 用于后台高德地图定位服务" "$INFO_PLIST" 2>/dev/null || \
-                    /usr/libexec/PlistBuddy -c "Set :NSLocationAlwaysAndWhenInUseUsageDescription 用于后台高德地图定位服务" "$INFO_PLIST"
-
-                    echo "=== Injecting camera/photo/mic permissions ==="
-                    /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 需要使用相机功能" "$INFO_PLIST" 2>/dev/null || \
-                    /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 需要使用相机功能" "$INFO_PLIST"
-
-                    /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 需要访问相册" "$INFO_PLIST" 2>/dev/null || \
-                    /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 需要访问相册" "$INFO_PLIST"
-
-                    /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 需要保存图片到相册" "$INFO_PLIST" 2>/dev/null || \
-                    /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 需要保存图片到相册" "$INFO_PLIST"
-
-                    /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 需要使用麦克风录音" "$INFO_PLIST" 2>/dev/null || \
-                    /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 需要使用麦克风录音" "$INFO_PLIST"
-
-                    echo "=== Injecting third-party keys ==="
-                    if [ -n "$AMAP_KEY" ]; then
-                        /usr/libexec/PlistBuddy -c "Add :AMapServicesKey string $AMAP_KEY" "$INFO_PLIST" 2>/dev/null || \
-                        /usr/libexec/PlistBuddy -c "Set :AMapServicesKey $AMAP_KEY" "$INFO_PLIST"
-                        echo "Injected AMap key: $AMAP_KEY"
-                    fi
-
-                    if [ -n "$WECHAT_APP_ID" ]; then
-                        /usr/libexec/PlistBuddy -c "Add :WXAppID string $WECHAT_APP_ID" "$INFO_PLIST" 2>/dev/null || \
-                        /usr/libexec/PlistBuddy -c "Set :WXAppID $WECHAT_APP_ID" "$INFO_PLIST"
-                        echo "Injected WeChat AppID: $WECHAT_APP_ID"
-                    fi
-
-                    echo "=== Info.plist updated successfully ==="
-                    /usr/libexec/PlistBuddy -c "Print :NSLocationWhenInUseUsageDescription" "$INFO_PLIST"
-                else
-                    echo "WARNING: Info.plist not found"
+                if [ ! -f "$INFO_PLIST" ]; then
+                    echo "WARNING: Info.plist not found, skipping"
+                    exit 0
                 fi
+
+                /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 用于高德地图定位服务" "$INFO_PLIST" 2>/dev/null || \
+                /usr/libexec/PlistBuddy -c "Set :NSLocationWhenInUseUsageDescription 用于高德地图定位服务" "$INFO_PLIST"
+
+                /usr/libexec/PlistBuddy -c "Add :NSLocationAlwaysAndWhenInUseUsageDescription string 用于后台高德地图定位服务" "$INFO_PLIST" 2>/dev/null || \
+                /usr/libexec/PlistBuddy -c "Set :NSLocationAlwaysAndWhenInUseUsageDescription 用于后台高德地图定位服务" "$INFO_PLIST"
+
+                /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 需要使用相机功能" "$INFO_PLIST" 2>/dev/null || \
+                /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 需要使用相机功能" "$INFO_PLIST"
+
+                /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 需要访问相册" "$INFO_PLIST" 2>/dev/null || \
+                /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 需要访问相册" "$INFO_PLIST"
+
+                /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 需要保存图片到相册" "$INFO_PLIST" 2>/dev/null || \
+                /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 需要保存图片到相册" "$INFO_PLIST"
+
+                /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 需要使用麦克风录音" "$INFO_PLIST" 2>/dev/null || \
+                /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 需要使用麦克风录音" "$INFO_PLIST"
+
+                if [ -n "$AMAP_KEY" ]; then
+                    /usr/libexec/PlistBuddy -c "Add :AMapServicesKey string $AMAP_KEY" "$INFO_PLIST" 2>/dev/null || \
+                    /usr/libexec/PlistBuddy -c "Set :AMapServicesKey $AMAP_KEY" "$INFO_PLIST"
+                    echo "AMap key injected"
+                fi
+
+                if [ -n "$WECHAT_APP_ID" ]; then
+                    /usr/libexec/PlistBuddy -c "Add :WXAppID string $WECHAT_APP_ID" "$INFO_PLIST" 2>/dev/null || \
+                    /usr/libexec/PlistBuddy -c "Set :WXAppID $WECHAT_APP_ID" "$INFO_PLIST"
+                    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$INFO_PLIST" 2>/dev/null || true
+                    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$INFO_PLIST" 2>/dev/null || true
+                    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string $WECHAT_APP_ID" "$INFO_PLIST" 2>/dev/null || true
+                    echo "WeChat AppID injected"
+                fi
+
+                echo "=== Info.plist updated ==="
 
             - name: Build unsigned IPA
               script: |
@@ -139,7 +153,7 @@ workflows:
                 ARCHIVE_PATH="$CM_BUILD_DIR/build.xcarchive"
                 mkdir -p "$EXPORT_DIR"
 
-                echo "=== Archiving... ==="
+                echo "=== Archiving ==="
                 xcodebuild archive \
                     -project "$XCODE_PROJECT" \
                     -scheme "$XCODE_SCHEME" \
@@ -151,27 +165,23 @@ workflows:
                     CODE_SIGN_IDENTITY="" \
                     2>&1 | tee /tmp/archive.log
 
-                echo "=== Finding .app bundle ==="
                 APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -maxdepth 5 | head -1)
                 if [ -z "$APP_PATH" ]; then
                     echo "ERROR: Cannot find .app in archive"
-                    find "$ARCHIVE_PATH" -name "*.app" 2>/dev/null
                     exit 1
                 fi
                 echo "Found app: $APP_PATH"
 
                 APP_NAME=$(basename "$APP_PATH" .app)
-                PAYLOAD_DIR="$EXPORT_DIR/Payload"
-                mkdir -p "$PAYLOAD_DIR"
-                cp -R "$APP_PATH" "$PAYLOAD_DIR/"
+                mkdir -p "$EXPORT_DIR/Payload"
+                cp -R "$APP_PATH" "$EXPORT_DIR/Payload/"
 
-                echo "=== Creating IPA ==="
-                IPA_PATH="$EXPORT_DIR/${APP_NAME}.ipa"
                 cd "$EXPORT_DIR"
-                zip -qr "$IPA_PATH" Payload/
+                zip -qr "${APP_NAME}.ipa" Payload/
                 cd -
-                echo "IPA generated: $IPA_PATH"
-                ls -lh "$IPA_PATH"
+
+                echo "=== IPA generated ==="
+                ls -lh "$EXPORT_DIR/${APP_NAME}.ipa"
 
         artifacts:
             - export/*.ipa
