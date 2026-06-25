@@ -2,17 +2,13 @@ workflows:
   ios-ipa:
     name: iOS Build IPA
     max_build_duration: 60
-    instance_type: mac_mini_m1
     environment:
-      groups:
-        - default
       vars:
         COCOS_VERSION: "2.2.2"
         COCOS_PLATFORM: "web-mobile"
         XCODE_SCHEME: "mobile"
         CONFIGURATION: "Release"
         BUNDLE_ID: "com.xiuxian.game"
-      node: latest
     scripts:
       - name: Download and install Cocos Creator
         script: |
@@ -201,7 +197,3 @@ workflows:
       - export/*.ipa
       - /tmp/cocos-build.log
       - /tmp/archive.log
-
-    publishing:
-      artifacts:
-        - path: export/*.ipa
