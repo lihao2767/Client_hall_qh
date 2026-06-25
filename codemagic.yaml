@@ -1,7 +1,7 @@
 workflows:
     ios-ipa:
         name: iOS Build IPA
-        max_build_duration: 60
+        max_build_duration: 120
         environment:
             vars:
                 COCOS_VERSION: "2.2.2"
@@ -13,69 +13,94 @@ workflows:
             - name: Download and install Cocos Creator
               script: |
                 set -e
-                echo "Downloading Cocos Creator 2.2.2..."
-                curl -L -o /tmp/cocos.dmg "https://digitalocean.cocos2d-x.org/CocosCreator/v2.2.2/CocosCreator_v2.2.2_20191227_mac.dmg" --retry 3 --retry-delay 5
+                echo "=== Downloading Cocos Creator ${COCOS_VERSION} ==="
+                curl -L -o /tmp/cocos.dmg \
+                    "https://digitalocean.cocos2d-x.org/CocosCreator/v2.2.2/CocosCreator_v2.2.2_20191227_mac.dmg" \
+                    --retry 3 --retry-delay 5
+                ls -lh /tmp/cocos.dmg
 
-                echo "Mounting dmg..."
+                echo "=== Mounting dmg ==="
                 hdiutil attach /tmp/cocos.dmg -nobrowse -quiet
+                sleep 3
 
-                echo "Copying Cocos Creator to Applications..."
-                cp -R "/Volumes/Cocos Creator/Cocos Creator.app" /Applications/
+                echo "=== Listing mounted volumes ==="
+                ls -la /Volumes/
 
-                echo "Unmounting dmg..."
-                hdiutil detach "/Volumes/Cocos Creator" -quiet
+                echo "=== Looking for Cocos app ==="
+                COCOS_APP=$(find /Volumes/ -maxdepth 3 -name "*.app" 2>/dev/null | grep -i cocos | head -1)
+                if [ -z "$COCOS_APP" ]; then
+                    echo "ERROR: Cannot find Cocos Creator app"
+                    find /Volumes/ -maxdepth 3 -name "*.app" 2>/dev/null
+                    exit 1
+                fi
+                echo "Found: $COCOS_APP"
 
-                COCOS_PATH="/Applications/Cocos Creator.app/Contents/MacOS/Cocos Creator"
+                echo "=== Copying to Applications ==="
+                cp -R "$COCOS_APP" /Applications/
+
+                COCOS_BASENAME=$(basename "$COCOS_APP")
+                COCOS_APP_TARGET="/Applications/${COCOS_BASENAME}"
+                echo "Installed app: $COCOS_APP_TARGET"
+
+                echo "=== Unmounting dmg ==="
+                hdiutil detach "$(dirname "$COCOS_APP")" -quiet
+
+                COCOS_PATH="${COCOS_APP_TARGET}/Contents/MacOS/Cocos Creator"
+                if [ ! -f "$COCOS_PATH" ]; then
+                    COCOS_PATH="${COCOS_APP_TARGET}/Contents/MacOS/CocosCreator"
+                fi
+                if [ ! -f "$COCOS_PATH" ]; then
+                    ls "${COCOS_APP_TARGET}/Contents/MacOS/"
+                    echo "ERROR: Cannot find Cocos Creator executable"
+                    exit 1
+                fi
                 echo "COCOS_PATH=$COCOS_PATH" >> $CM_ENV
-                echo "Cocos Creator installed at: $COCOS_PATH"
+                echo "=== Cocos Creator installed at: $COCOS_PATH ==="
 
             - name: Build iOS with Cocos Creator
               script: |
                 set -e
-                echo "Starting Cocos Creator build..."
+                echo "=== Building iOS with Cocos Creator ==="
                 "$COCOS_PATH" \
                     --path "$CM_BUILD_DIR" \
                     --build "platform=ios;debug=false;template=default;md5Cache=true" \
                     2>&1 | tee /tmp/cocos-build.log
-
-                echo "Cocos build completed"
-                echo "Build output:"
-                ls -la "$CM_BUILD_DIR/build"
+                echo "=== Cocos build completed ==="
+                ls -la "$CM_BUILD_DIR/build/"
 
             - name: Locate Xcode project
               script: |
                 set -e
-                echo "Searching for Xcode project..."
-
+                echo "=== Searching for Xcode project ==="
                 PROJECT_FILE=$(find "$CM_BUILD_DIR/build" -name "*.xcodeproj" -maxdepth 4 | head -1)
-                echo "XCODE_PROJECT=$PROJECT_FILE" >> $CM_ENV
-                echo "Found project: $PROJECT_FILE"
-
                 if [ -z "$PROJECT_FILE" ]; then
-                    echo "No Xcode project found!"
-                    find "$CM_BUILD_DIR/build" -name "*.xcodeproj"
+                    echo "ERROR: No Xcode project found"
+                    find "$CM_BUILD_DIR/build" -name "*.xcodeproj" 2>/dev/null
+                    find "$CM_BUILD_DIR/build" -type d -maxdepth 5 2>/dev/null
                     exit 1
                 fi
+                echo "XCODE_PROJECT=$PROJECT_FILE" >> $CM_ENV
+                echo "Found: $PROJECT_FILE"
 
-                SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -E "^\s+-" | grep -i mobile | head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
-                if [ -z "$SCHEME_NAME" ]; then
-                    SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -E "^\s+-" | head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
-                fi
+                SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -E "^\s+-" | head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
                 echo "XCODE_SCHEME=$SCHEME_NAME" >> $CM_ENV
-                echo "Using scheme: $SCHEME_NAME"
+                echo "Scheme: $SCHEME_NAME"
 
             - name: Inject permissions and keys
               script: |
+                set -e
                 INFO_PLIST=$(find "$CM_BUILD_DIR/build" -name "Info.plist" -maxdepth 6 | grep -i "ios\|mobile" | head -1)
-                echo "Info.plist path: $INFO_PLIST"
+                echo "Info.plist: $INFO_PLIST"
 
                 if [ -f "$INFO_PLIST" ]; then
+                    echo "=== Injecting location permissions ==="
                     /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 用于高德地图定位服务" "$INFO_PLIST" 2>/dev/null || \
                     /usr/libexec/PlistBuddy -c "Set :NSLocationWhenInUseUsageDescription 用于高德地图定位服务" "$INFO_PLIST"
 
                     /usr/libexec/PlistBuddy -c "Add :NSLocationAlwaysAndWhenInUseUsageDescription string 用于后台高德地图定位服务" "$INFO_PLIST" 2>/dev/null || \
                     /usr/libexec/PlistBuddy -c "Set :NSLocationAlwaysAndWhenInUseUsageDescription 用于后台高德地图定位服务" "$INFO_PLIST"
 
+                    echo "=== Injecting camera/photo/mic permissions ==="
                     /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 需要使用相机功能" "$INFO_PLIST" 2>/dev/null || \
                     /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 需要使用相机功能" "$INFO_PLIST"
 
@@ -88,17 +113,21 @@ workflows:
                     /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 需要使用麦克风录音" "$INFO_PLIST" 2>/dev/null || \
                     /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 需要使用麦克风录音" "$INFO_PLIST"
 
+                    echo "=== Injecting third-party keys ==="
                     if [ -n "$AMAP_KEY" ]; then
                         /usr/libexec/PlistBuddy -c "Add :AMapServicesKey string $AMAP_KEY" "$INFO_PLIST" 2>/dev/null || \
                         /usr/libexec/PlistBuddy -c "Set :AMapServicesKey $AMAP_KEY" "$INFO_PLIST"
+                        echo "Injected AMap key: $AMAP_KEY"
                     fi
 
                     if [ -n "$WECHAT_APP_ID" ]; then
                         /usr/libexec/PlistBuddy -c "Add :WXAppID string $WECHAT_APP_ID" "$INFO_PLIST" 2>/dev/null || \
                         /usr/libexec/PlistBuddy -c "Set :WXAppID $WECHAT_APP_ID" "$INFO_PLIST"
+                        echo "Injected WeChat AppID: $WECHAT_APP_ID"
                     fi
 
-                    echo "Info.plist updated"
+                    echo "=== Info.plist updated successfully ==="
+                    /usr/libexec/PlistBuddy -c "Print :NSLocationWhenInUseUsageDescription" "$INFO_PLIST"
                 else
                     echo "WARNING: Info.plist not found"
                 fi
@@ -110,7 +139,7 @@ workflows:
                 ARCHIVE_PATH="$CM_BUILD_DIR/build.xcarchive"
                 mkdir -p "$EXPORT_DIR"
 
-                echo "Archiving..."
+                echo "=== Archiving... ==="
                 xcodebuild archive \
                     -project "$XCODE_PROJECT" \
                     -scheme "$XCODE_SCHEME" \
@@ -122,7 +151,13 @@ workflows:
                     CODE_SIGN_IDENTITY="" \
                     2>&1 | tee /tmp/archive.log
 
-                APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -maxdepth 4 | head -1)
+                echo "=== Finding .app bundle ==="
+                APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -maxdepth 5 | head -1)
+                if [ -z "$APP_PATH" ]; then
+                    echo "ERROR: Cannot find .app in archive"
+                    find "$ARCHIVE_PATH" -name "*.app" 2>/dev/null
+                    exit 1
+                fi
                 echo "Found app: $APP_PATH"
 
                 APP_NAME=$(basename "$APP_PATH" .app)
@@ -130,11 +165,11 @@ workflows:
                 mkdir -p "$PAYLOAD_DIR"
                 cp -R "$APP_PATH" "$PAYLOAD_DIR/"
 
+                echo "=== Creating IPA ==="
                 IPA_PATH="$EXPORT_DIR/${APP_NAME}.ipa"
                 cd "$EXPORT_DIR"
                 zip -qr "$IPA_PATH" Payload/
                 cd -
-
                 echo "IPA generated: $IPA_PATH"
                 ls -lh "$IPA_PATH"
 
