@@ -1,0 +1,207 @@
+workflows:
+  ios-ipa:
+    name: iOS Build IPA
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      groups:
+        - default
+      vars:
+        COCOS_VERSION: "2.2.2"
+        COCOS_PLATFORM: "web-mobile"
+        XCODE_SCHEME: "mobile"
+        CONFIGURATION: "Release"
+        BUNDLE_ID: "com.xiuxian.game"
+      node: latest
+    scripts:
+      - name: Download and install Cocos Creator
+        script: |
+          set -e
+          echo "Downloading Cocos Creator ${COCOS_VERSION}..."
+          
+          COCOS_DMG="CocosCreator_v${COCOS_VERSION}_en.dmg"
+          COCOS_URL="https://cocos2d-x.org/filedownload/${COCOS_VERSION}/${COCOS_DMG}"
+          
+          curl -L -o /tmp/cocos.dmg "$COCOS_URL" --retry 3 --retry-delay 5
+          
+          echo "Mounting dmg..."
+          hdiutil attach /tmp/cocos.dmg -nobrowse -quiet
+          
+          echo "Copying Cocos Creator to Applications..."
+          cp -R "/Volumes/Cocos Creator/Cocos Creator.app" /Applications/
+          
+          echo "Unmounting dmg..."
+          hdiutil detach "/Volumes/Cocos Creator" -quiet
+          
+          COCOS_PATH="/Applications/Cocos Creator.app/Contents/MacOS/Cocos Creator"
+          echo "COCOS_PATH=$COCOS_PATH" >> $CM_ENV
+          echo "Cocos Creator installed at: $COCOS_PATH"
+          
+          ls -la "/Applications/Cocos Creator.app/Contents/MacOS/"
+
+      - name: Build iOS with Cocos Creator
+        script: |
+          set -e
+          BUILD_PATH="$CM_BUILD_DIR/build/jsb-default"
+          echo "BUILD_PATH=$BUILD_PATH" >> $CM_ENV
+          
+          mkdir -p "$BUILD_PATH"
+          
+          echo "Starting Cocos Creator build..."
+          "$COCOS_PATH" \
+            --path "$CM_BUILD_DIR" \
+            --build "platform=ios;debug=false;template=default;md5Cache=true;encryptJs=true;xxteaKey=cocos2dx" \
+            2>&1 | tee /tmp/cocos-build.log
+          
+          echo "Cocos build completed"
+          
+          echo "Build output directory structure:"
+          ls -la "$BUILD_PATH" || echo "Build path not found at $BUILD_PATH"
+          
+          echo "Looking for Xcode project..."
+          find "$CM_BUILD_DIR/build" -name "*.xcodeproj" 2>/dev/null || echo "No xcodeproj found yet"
+
+      - name: Locate Xcode project
+        script: |
+          set -e
+          echo "Searching for Xcode project..."
+          
+          XCODEPROJ_DIR=$(find "$CM_BUILD_DIR/build" -name "proj.ios_mac" -type d 2>/dev/null | head -1)
+          if [ -z "$XCODEPROJ_DIR" ]; then
+            XCODEPROJ_DIR=$(find "$CM_BUILD_DIR/build" -name "ios-build" -type d 2>/dev/null | head -1)
+          fi
+          
+          echo "Xcode project dir: $XCODEPROJ_DIR"
+          ls -la "$XCODEPROJ_DIR"
+          
+          PROJECT_FILE=$(find "$XCODEPROJ_DIR" -name "*.xcodeproj" -maxdepth 1 | head -1)
+          echo "XCODE_PROJECT=$PROJECT_FILE" >> $CM_ENV
+          echo "Found project: $PROJECT_FILE"
+          
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "No Xcode project found!"
+            find "$CM_BUILD_DIR/build" -name "*.xcodeproj"
+            exit 1
+          fi
+          
+          SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -E "^\s+-" | grep -i mobile | head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
+          if [ -z "$SCHEME_NAME" ]; then
+            SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -E "^\s+-" | head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
+          fi
+          echo "XCODE_SCHEME=$SCHEME_NAME" >> $CM_ENV
+          echo "Using scheme: $SCHEME_NAME"
+
+      - name: Inject iOS permissions and keys to Info.plist
+        script: |
+          set -e
+          INFO_PLIST=$(find "$XCODE_PROJECT/.." -name "Info.plist" -maxdepth 3 | grep -i "ios\|mobile" | head -1)
+          if [ -z "$INFO_PLIST" ]; then
+            INFO_PLIST=$(find "$CM_BUILD_DIR/build" -name "Info.plist" -maxdepth 5 | head -1)
+          fi
+          
+          echo "Info.plist path: $INFO_PLIST"
+          
+          if [ -f "$INFO_PLIST" ]; then
+            echo "Backing up Info.plist"
+            cp "$INFO_PLIST" "$INFO_PLIST.bak"
+            
+            /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 需要获取您的位置信息，用于高德地图定位服务" "$INFO_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSLocationWhenInUseUsageDescription 需要获取您的位置信息，用于高德地图定位服务" "$INFO_PLIST"
+            
+            /usr/libexec/PlistBuddy -c "Add :NSLocationAlwaysAndWhenInUseUsageDescription string 需要获取您的位置信息，用于后台高德地图定位服务" "$INFO_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSLocationAlwaysAndWhenInUseUsageDescription 需要获取您的位置信息，用于后台高德地图定位服务" "$INFO_PLIST"
+            
+            /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 需要使用相机功能，用于拍照和视频录制" "$INFO_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 需要使用相机功能，用于拍照和视频录制" "$INFO_PLIST"
+            
+            /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 需要访问相册，用于选择和读取图片" "$INFO_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 需要访问相册，用于选择和读取图片" "$INFO_PLIST"
+            
+            /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 需要保存图片到相册" "$INFO_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 需要保存图片到相册" "$INFO_PLIST"
+            
+            /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 需要使用麦克风，用于录音功能" "$INFO_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 需要使用麦克风，用于录音功能" "$INFO_PLIST"
+            
+            if [ -n "$AMAP_KEY" ]; then
+              /usr/libexec/PlistBuddy -c "Add :AMapServicesKey string $AMAP_KEY" "$INFO_PLIST" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Set :AMapServicesKey $AMAP_KEY" "$INFO_PLIST"
+              echo "AMap key injected"
+            fi
+            
+            if [ -n "$WECHAT_APP_ID" ]; then
+              /usr/libexec/PlistBuddy -c "Add :WXAppID string $WECHAT_APP_ID" "$INFO_PLIST" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Set :WXAppID $WECHAT_APP_ID" "$INFO_PLIST"
+              
+              /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$INFO_PLIST" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$INFO_PLIST" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string $WECHAT_APP_ID" "$INFO_PLIST" 2>/dev/null || true
+              echo "WeChat AppID injected"
+            fi
+            
+            if [ -n "$WECHAT_UNIVERSAL_LINK" ]; then
+              /usr/libexec/PlistBuddy -c "Add :WXUniversalLink string $WECHAT_UNIVERSAL_LINK" "$INFO_PLIST" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Set :WXUniversalLink $WECHAT_UNIVERSAL_LINK" "$INFO_PLIST"
+              echo "WeChat Universal Link injected"
+            fi
+            
+            echo "Info.plist updated successfully"
+            cat "$INFO_PLIST"
+          else
+            echo "WARNING: Info.plist not found, permissions will not be injected"
+          fi
+
+      - name: Archive and export unsigned IPA
+        script: |
+          set -e
+          EXPORT_DIR="$CM_BUILD_DIR/export"
+          ARCHIVE_PATH="$CM_BUILD_DIR/hall_split.xcarchive"
+          mkdir -p "$EXPORT_DIR"
+          
+          echo "Archiving..."
+          xcodebuild archive \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -archivePath "$ARCHIVE_PATH" \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee /tmp/archive.log
+          
+          echo "Finding .app in archive..."
+          APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -maxdepth 4 | head -1)
+          echo "Found app: $APP_PATH"
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: .app not found in archive!"
+            find "$ARCHIVE_PATH" -name "*.app"
+            exit 1
+          fi
+          
+          APP_NAME=$(basename "$APP_PATH" .app)
+          echo "App name: $APP_NAME"
+          
+          echo "Creating unsigned IPA manually..."
+          PAYLOAD_DIR="$EXPORT_DIR/Payload"
+          mkdir -p "$PAYLOAD_DIR"
+          cp -R "$APP_PATH" "$PAYLOAD_DIR/"
+          
+          IPA_PATH="$EXPORT_DIR/${APP_NAME}.ipa"
+          cd "$EXPORT_DIR"
+          zip -qr "$IPA_PATH" Payload/
+          cd -
+          
+          echo "IPA_PATH=$IPA_PATH" >> $CM_ENV
+          echo "Unsigned IPA generated: $IPA_PATH"
+          ls -lh "$IPA_PATH"
+
+    artifacts:
+      - export/*.ipa
+      - /tmp/cocos-build.log
+      - /tmp/archive.log
+
+    publishing:
+      artifacts:
+        - path: export/*.ipa
