@@ -1,0 +1,269 @@
+name: iOS Build IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-13
+    timeout-minutes: 120
+    
+    env:
+      COCOS_VERSION: 2.2.2
+      COCOS_DOWNLOAD_URL: "https://download.cocos.com/CocosCreator/v2.2.2/CocosCreator_v2.2.2_mac.dmg"
+      PROJECT_PATH: ${{ github.workspace }}
+      BUILD_PATH: ${{ github.workspace }}/build/jsb-default
+      XCODE_PROJECT: ${{ github.workspace }}/build/jsb-default/frameworks/runtime-src/proj.ios_mac/hall_split.xcodeproj
+      SCHEME: "hall_split-mobile"
+      CONFIGURATION: Release
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          lfs: false
+          
+      - name: Cache Cocos Creator
+        id: cache-cocos
+        uses: actions/cache@v3
+        with:
+          path: /Applications/CocosCreator.app
+          key: cocos-creator-${{ env.COCOS_VERSION }}-macos
+          
+      - name: Download and install Cocos Creator
+        if: steps.cache-cocos.outputs.cache-hit != 'true'
+        run: |
+          echo "Downloading Cocos Creator $COCOS_VERSION..."
+          curl -L -o /tmp/cocos.dmg "$COCOS_DOWNLOAD_URL"
+          
+          echo "Mounting DMG..."
+          hdiutil attach /tmp/cocos.dmg -nobrowse -mountpoint /tmp/cocos-mount
+          
+          echo "Copying to Applications..."
+          cp -R /tmp/cocos-mount/CocosCreator.app /Applications/
+          
+          echo "Unmounting DMG..."
+          hdiutil detach /tmp/cocos-mount
+          
+          echo "Cleaning up..."
+          rm /tmp/cocos.dmg
+          
+          echo "Cocos Creator installed successfully"
+          
+      - name: Build iOS project with Cocos Creator
+        run: |
+          COCOS_BIN="/Applications/CocosCreator.app/Contents/MacOS/CocosCreator"
+          
+          echo "Building iOS project..."
+          "$COCOS_BIN" \
+            --path "$PROJECT_PATH" \
+            --build "platform=ios;debug=false;template=default;md5Cache=false;encryptJs=true;xxteaKey=df124dde-c814-4b;zipCompressJs=true;inlineSpriteFrames_native=true" \
+            2>&1 | tee /tmp/cocos-build.log
+          
+          echo "Build completed"
+          ls -la "$BUILD_PATH"
+          
+      - name: Inject iOS permissions to Info.plist
+        env:
+          AMAP_KEY: ${{ secrets.AMAP_KEY }}
+        run: |
+          INFO_PLIST=$(find "$BUILD_PATH/frameworks/runtime-src/proj.ios_mac" -name "Info.plist" -maxdepth 2 | grep -i "ios\|mobile" | head -1)
+          
+          if [ -z "$INFO_PLIST" ]; then
+            INFO_PLIST=$(find "$BUILD_PATH/frameworks/runtime-src/proj.ios_mac" -name "Info.plist" -maxdepth 2 | head -1)
+          fi
+          
+          if [ -z "$INFO_PLIST" ]; then
+            echo "Info.plist not found, searching deeper..."
+            INFO_PLIST=$(find "$BUILD_PATH" -name "Info.plist" | grep -i "ios\|mobile" | head -1)
+          fi
+          
+          if [ -z "$INFO_PLIST" ]; then
+            echo "ERROR: Info.plist not found!"
+            find "$BUILD_PATH" -name "Info.plist"
+            exit 1
+          fi
+          
+          echo "Found Info.plist at: $INFO_PLIST"
+          echo "Current Info.plist content:"
+          cat "$INFO_PLIST"
+          
+          add_permission() {
+            local key="$1"
+            local value="$2"
+            if /usr/libexec/PlistBuddy -c "Print :$key" "$INFO_PLIST" 2>/dev/null; then
+              echo "Updating existing key: $key"
+              /usr/libexec/PlistBuddy -c "Set :$key '$value'" "$INFO_PLIST"
+            else
+              echo "Adding new key: $key"
+              /usr/libexec/PlistBuddy -c "Add :$key string '$value'" "$INFO_PLIST"
+            fi
+          }
+          
+          add_permission "NSLocationWhenInUseUsageDescription" "需要获取您的位置信息，用于高德地图定位服务"
+          add_permission "NSLocationAlwaysAndWhenInUseUsageDescription" "需要获取您的位置信息，用于后台高德地图定位服务"
+          add_permission "NSCameraUsageDescription" "需要访问您的相机，用于拍照和视频功能"
+          add_permission "NSPhotoLibraryUsageDescription" "需要访问您的相册，用于保存和选择图片"
+          add_permission "NSPhotoLibraryAddUsageDescription" "需要保存图片到您的相册"
+          add_permission "NSMicrophoneUsageDescription" "需要访问您的麦克风，用于录音和语音功能"
+          
+          if [ -n "$AMAP_KEY" ]; then
+            add_permission "AMapServicesKey" "$AMAP_KEY"
+            echo "AMapServicesKey configured"
+          else
+            echo "WARNING: AMAP_KEY secret not set, AMap services key not configured!"
+          fi
+          
+          echo "Updated Info.plist content:"
+          cat "$INFO_PLIST"
+          
+      - name: Set up Xcode
+        run: |
+          xcodebuild -version
+          xcode-select -p
+          
+      - name: Install iOS certificate and profile
+        env:
+          IOS_CODE_SIGN_IDENTITY: ${{ secrets.IOS_CODE_SIGN_IDENTITY }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: |
+          if [ -z "$IOS_CODE_SIGN_IDENTITY" ] || [ -z "$IOS_PROVISIONING_PROFILE" ]; then
+            echo "No signing credentials found, will use manual signing or skip code signing"
+            exit 0
+          fi
+          
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+          KEYCHAIN_PASSWORD="cocosbuild"
+          
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          
+          echo "$IOS_CODE_SIGN_IDENTITY" | base64 -d > /tmp/certificate.p12
+          security import /tmp/certificate.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          
+          PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILE_PATH"
+          echo "$IOS_PROVISIONING_PROFILE" | base64 -d > "$PROFILE_PATH/embedded.mobileprovision"
+          
+          echo "Certificate and profile installed"
+          
+      - name: Resolve Xcode project settings
+        run: |
+          XCODEPROJ_DIR="$BUILD_PATH/frameworks/runtime-src/proj.ios_mac"
+          echo "Looking for Xcode project in $XCODEPROJ_DIR"
+          ls -la "$XCODEPROJ_DIR"
+          
+          PROJECT_FILE=$(find "$XCODEPROJ_DIR" -name "*.xcodeproj" -maxdepth 1 | head -1)
+          echo "Found project: $PROJECT_FILE"
+          
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "No Xcode project found!"
+            exit 1
+          fi
+          
+          echo "XCODE_PROJECT=$PROJECT_FILE" >> $GITHUB_ENV
+          
+          SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -E "^\s+-" | grep -i mobile | head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
+          if [ -z "$SCHEME_NAME" ]; then
+            SCHEME_NAME=$(xcodebuild -project "$PROJECT_FILE" -list 2>/dev/null | grep -E "^\s+-" | head -1 | sed 's/^[[:space:]]*-[[:space:]]*//')
+          fi
+          echo "SCHEME=$SCHEME_NAME" >> $GITHUB_ENV
+          echo "Using scheme: $SCHEME_NAME"
+          
+      - name: Archive and export IPA
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          EXPORT_DIR="$RUNNER_TEMP/export"
+          ARCHIVE_PATH="$RUNNER_TEMP/hall_split.xcarchive"
+          mkdir -p "$EXPORT_DIR"
+          
+          EXPORT_PLIST="$RUNNER_TEMP/ExportOptions.plist"
+          
+          if [ -n "$IOS_TEAM_ID" ]; then
+            cat > "$EXPORT_PLIST" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>teamID</key>
+            <string>$IOS_TEAM_ID</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+          </dict>
+          </plist>
+          EOF
+          else
+            cat > "$EXPORT_PLIST" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+          </dict>
+          </plist>
+          EOF
+          fi
+          
+          echo "ExportOptions.plist:"
+          cat "$EXPORT_PLIST"
+          
+          echo "Archiving..."
+          xcodebuild archive \
+            -project "$XCODE_PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -archivePath "$ARCHIVE_PATH" \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee /tmp/archive.log
+          
+          echo "Exporting IPA..."
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_DIR" \
+            -exportOptionsPlist "$EXPORT_PLIST" \
+            2>&1 | tee /tmp/export.log
+          
+          IPA_FILE=$(find "$EXPORT_DIR" -name "*.ipa" -maxdepth 1 | head -1)
+          if [ -n "$IPA_FILE" ]; then
+            echo "IPA_FILE=$IPA_FILE" >> $GITHUB_ENV
+            echo "IPA generated: $IPA_FILE"
+            ls -lh "$IPA_FILE"
+          else
+            echo "No IPA file found!"
+            ls -la "$EXPORT_DIR"
+          fi
+          
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ios-ipa
+          path: ${{ env.IPA_FILE }}
+          if-no-files-found: error
+          
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-logs
+          path: |
+            /tmp/cocos-build.log
+            /tmp/archive.log
+            /tmp/export.log
+          if-no-files-found: ignore

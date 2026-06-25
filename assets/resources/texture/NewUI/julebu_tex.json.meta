@@ -1,0 +1,7 @@
+{
+  "ver": "1.0.0",
+  "uuid": "d4e7dde7-831f-42af-8738-4273dbbd5fdf",
+  "atlasJson": "{\"SubTexture\":[{\"width\":243,\"y\":1,\"height\":404,\"name\":\"julebu/di\",\"x\":1},{\"width\":78,\"y\":387,\"height\":91,\"name\":\"julebu/majiang\",\"x\":246},{\"width\":217,\"y\":1,\"height\":228,\"name\":\"julebu/fangzi\",\"x\":246},{\"width\":141,\"y\":1,\"height\":147,\"name\":\"julebu/g\",\"x\":465},{\"width\":222,\"y\":231,\"height\":154,\"name\":\"julebu/zi\",\"x\":246}],\"width\":1024,\"height\":512,\"name\":\"julebu\",\"imagePath\":\"julebu_tex.png\"}",
+  "texture": "2937b627-af6f-4295-a726-615567a0324a",
+  "subMetas": {}
+}

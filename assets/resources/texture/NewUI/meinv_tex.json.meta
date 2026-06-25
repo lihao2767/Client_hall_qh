@@ -1,0 +1,7 @@
+{
+  "ver": "1.0.0",
+  "uuid": "7793db81-8e52-4993-b540-7ed4442591e3",
+  "atlasJson": "{\"SubTexture\":[{\"width\":405,\"y\":492,\"height\":341,\"name\":\"meinv/youshou\",\"x\":596},{\"width\":593,\"y\":492,\"height\":328,\"name\":\"meinv/zuoshou\",\"x\":1},{\"width\":151,\"y\":835,\"height\":179,\"name\":\"meinv/tou\",\"x\":517},{\"width\":674,\"y\":1,\"height\":489,\"name\":\"meinv/shenti\",\"x\":1},{\"width\":268,\"y\":822,\"height\":158,\"name\":\"meinv/zuo\",\"x\":1},{\"width\":41,\"y\":835,\"height\":103,\"name\":\"meinv/toufa\",\"x\":825},{\"width\":76,\"y\":970,\"height\":39,\"name\":\"meinv/you\",\"x\":271},{\"width\":244,\"y\":822,\"height\":146,\"name\":\"meinv/denglogn1\",\"x\":271},{\"width\":153,\"y\":835,\"height\":86,\"name\":\"meinv/denglong2\",\"x\":670},{\"width\":83,\"y\":923,\"height\":68,\"name\":\"Btnguang\",\"x\":670},{\"width\":52,\"y\":923,\"height\":32,\"name\":\"meinv/yanpi\",\"x\":755}],\"width\":1024,\"height\":1024,\"name\":\"meinv\",\"imagePath\":\"meinv_tex.png\"}",
+  "texture": "2b10be63-8668-4fa6-be7e-74cdcaa54e09",
+  "subMetas": {}
+}

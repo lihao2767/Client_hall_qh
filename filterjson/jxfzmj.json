@@ -1,0 +1,16 @@
+{
+  "1": {
+    "ID": 1,
+    "filterType": 1,
+    "selectKeyValue": "gaoji:1",
+    "filterKeyValue": "gaoji:3",
+    "Memo": null
+  },
+  "2": {
+    "ID": 2,
+    "filterType": 1,
+    "selectKeyValue": "gaoji:3",
+    "filterKeyValue": "gaoji:1",
+    "Memo": null
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "1": {
+    "ID": 1,
+    "filterType": 4,
+    "selectKeyValue": "kexuanwanfa:6",
+    "filterKeyValue": "kexuanwanfa:4",
+    "Memo": "未勾选一炮多响时，不可选择一炮多响点炮做庄"
+  },
+  "2": {
+    "ID": 2,
+    "filterType": 3,
+    "selectKeyValue": "kexuanwanfa:4",
+    "filterKeyValue": "kexuanwanfa:6",
+    "Memo": null
+  },
+  "3": {
+    "ID": 3,
+    "filterType": 3,
+    "selectKeyValue": "kexuanwanfa:4",
+    "filterKeyValue": "yipaoduoxiangzhuaniao",
+    "Memo": "一炮多响抓鸟"
+  },
+  "4": {
+    "ID": 4,
+    "filterType": 6,
+    "selectKeyValue": "kexuanwanfa:3",
+    "filterKeyValue": "kexuanwanfa:2",
+    "Memo": "未勾选无大牌时，不可选择游金倍数"
+  },
+  "5": {
+    "ID": 5,
+    "filterType": 6,
+    "selectKeyValue": "kexuanwanfa:4",
+    "filterKeyValue": "kexuanwanfa:2",
+    "Memo": "未勾选无大牌时，不可选择游金倍数"
+  }
+}

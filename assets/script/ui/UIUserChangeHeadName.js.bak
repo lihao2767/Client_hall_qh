@@ -1,0 +1,110 @@
+var app = require("app");
+cc.Class({
+    extends: require("BaseForm"),
+
+    properties: {
+        sp_head:cc.Sprite,
+        editBox:cc.EditBox,
+        demohead:cc.Node,
+        layout:cc.Node,
+    },
+
+    OnCreateInit: function () {
+        this.RegEvent("OnUploadImage", this.Event_OnUploadImage, this);
+        this.WeChatManager = app.WeChatManager();
+        this.RandAddHead();
+    },
+    OnShow: function () {
+        let heroName = app.HeroManager().GetHeroProperty("name");
+        let heroID=app.HeroManager().GetHeroProperty("pid");
+        this.editBox.string=heroName;
+        let headImageUrl=app.HeroManager().GetHeroProperty("headImageUrl");
+        this.uploadImgURL=headImageUrl;
+        if(headImageUrl!=""){
+            this.WeChatManager.InitHeroHeadImage(heroID,headImageUrl);
+            let WeChatHeadImage1 = this.sp_head.getComponent("WeChatHeadImage");
+            WeChatHeadImage1.OnLoad();
+            WeChatHeadImage1.ShowHeroHead(heroID);
+        }
+
+
+        //this.isMobile = app.HeroAccountManager().GetAccountProperty("isMobile");
+    },
+    RandAddHead:function(){
+        //http://8.159.141.75/uploadfile/touxiang/1.jpg
+        //http://8.159.141.75/uploadfile/touxiang/2968.jpg
+        let addNum=50; //随机添加多少头像 阳阳改
+        let num=this.randomNum(1,2000-addNum);
+        for(let i=num;i<num+addNum;i++){
+            let addHead = cc.instantiate(this.demohead);
+            addHead.active=true;
+            addHead.heroID=i;
+            this.layout.addChild(addHead);
+            let headImageUrl="http://8.159.141.75:82/uploadfile/touxiang/"+i+".jpg";
+            addHead.imgurl=headImageUrl;
+            this.WeChatManager.InitHeroHeadImage(i, headImageUrl);
+            let WeChatHeadImage=addHead.getComponent("WeChatHeadImage");
+            WeChatHeadImage.OnLoad();
+            WeChatHeadImage.ShowHeroHead(i,headImageUrl);
+        }
+    },
+    randomNum:function(m,n){
+        var num = Math.floor(Math.random()*(m - n) + n);
+        return num;
+    },
+    Event_OnUploadImage:function(event){
+        let heroID=this.randomNum(1,10000);
+        let uploadImgURL=event.uploadImgURL;
+        this.WeChatManager.InitHeroHeadImage(heroID,uploadImgURL,true);
+        let WeChatHeadImage1 = this.sp_head.getComponent("WeChatHeadImage");
+        WeChatHeadImage1.OnLoad();
+        WeChatHeadImage1.ShowHeroHead(heroID);
+        this.uploadImgURL=uploadImgURL;
+    },
+    OnClick:function(btnName, btnNode){
+        if("btn_save"==btnName){
+            //保存名字
+            let name=this.node.getChildByName("EditBox").getComponent(cc.EditBox).string;
+            if(name==""){
+                 app.SysNotifyManager().ShowSysMsg("请输入昵称",[],3);
+                 return;
+            }
+            let uploadImgURL=this.uploadImgURL;
+            if(uploadImgURL==""){
+                 app.SysNotifyManager().ShowSysMsg("请选择一张头像或者上传一张头像",[],3);
+                 return;
+            }
+            let self = this;
+            app.NetManager().SendPack("player.CPlayerChangeNameAndHeadImg", {"name":name,"headImg":uploadImgURL}, function(event){
+                app.HeroManager().SetHeroProperty("name",name);
+                app.SysNotifyManager().ShowSysMsg("修改成功",[],3);
+                //刷新大厅名字
+                app.NetManager().SendPack("player.CPlayerChanged", {}); //请求刷新玩家数据
+                self.scheduleOnce(function(){
+                    app.Client.OnEvent("HeroProperty",{"Property":'name',"name":name});
+                    app.Client.OnEvent("HeroProperty",{"Property":'headimg',"name":uploadImgURL});
+                    self.CloseForm();
+                },1);
+               
+            }, function(event){
+                    console.log("名字保存失败");
+               }
+            );
+        }else if("btn_add"==btnName){
+            let uploadImgURL = app.Client.GetClientConfigProperty("uploadImgURL");
+            let argList = [{"Name":"uploadImgURL", "Value":uploadImgURL}];
+            app.NativeManager().CallToNative("openPhotoAlbum", argList);
+        }else if("btn_close"==btnName){
+            this.CloseForm();
+        }else if("demo"==btnName){
+            let imgurl=btnNode.imgurl;
+            let heroID=btnNode.heroID;
+            let uploadImgURL=imgurl;
+            this.WeChatManager.InitHeroHeadImage(heroID,uploadImgURL);
+            let WeChatHeadImage1 = this.sp_head.getComponent("WeChatHeadImage");
+            WeChatHeadImage1.OnLoad();
+            WeChatHeadImage1.ShowHeroHead(heroID);
+            this.uploadImgURL=uploadImgURL;
+        }
+    },
+});

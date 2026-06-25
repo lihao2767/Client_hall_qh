@@ -1,0 +1,16 @@
+{
+  "1": {
+    "ID": 1,
+    "filterType": 8,
+    "selectKeyValue": "kexuanwanfa:2",
+    "filterKeyValue": "kexuanwanfa:3",
+    "Memo": null
+  },
+  "2": {
+    "ID": 2,
+    "filterType": 8,
+    "selectKeyValue": "kexuanwanfa:1",
+    "filterKeyValue": "kexuanwanfa:14,kexuanwanfa:15",
+    "Memo": null
+  }
+}

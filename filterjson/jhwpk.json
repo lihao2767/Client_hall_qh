@@ -1,0 +1,44 @@
+{
+  "1": {
+    "ID": 1,
+    "filterType": 0,
+    "selectKeyValue": "gaoji:1,gaoji:3",
+    "filterKeyValue": null,
+    "Memo": null
+  },
+  "2": {
+    "ID": 2,
+    "filterType": 0,
+    "selectKeyValue": "fangjian:2,fangjian:4",
+    "filterKeyValue": null,
+    "Memo": null
+  },
+  "3": {
+    "ID": 3,
+    "filterType": 0,
+    "selectKeyValue": "kexuanwanfa:0,kexuanwanfa:5",
+    "filterKeyValue": null,
+    "Memo": null
+  },
+  "5": {
+    "ID": 5,
+    "filterType": 0,
+    "selectKeyValue": "fangjian:3,fangjian:5",
+    "filterKeyValue": null,
+    "Memo": null
+  },
+  "6": {
+    "ID": 6,
+    "filterType": 7,
+    "selectKeyValue": "renshu:0",
+    "filterKeyValue": "kexuanwanfa:7",
+    "Memo": null
+  },
+  "7": {
+    "ID": 7,
+    "filterType": 8,
+    "selectKeyValue": "renshu:0",
+    "filterKeyValue": "kexuanwanfa:0",
+    "Memo": 3
+  }
+}

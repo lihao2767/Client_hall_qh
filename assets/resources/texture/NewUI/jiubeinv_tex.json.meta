@@ -1,0 +1,7 @@
+{
+  "ver": "1.0.0",
+  "uuid": "b0e08322-20fe-41ee-99c5-5c2baf58b301",
+  "atlasJson": "{\"SubTexture\":[{\"width\":185,\"y\":1,\"height\":357,\"name\":\"jiubeinv/shen\",\"x\":1},{\"width\":83,\"y\":386,\"height\":101,\"name\":\"jiubeinv/zhongmao\",\"x\":278},{\"width\":49,\"y\":1,\"height\":101,\"name\":\"jiubeinv/houfa\",\"x\":526},{\"width\":207,\"y\":1,\"height\":261,\"name\":\"jiubeinv/tuo\",\"x\":188},{\"width\":78,\"y\":360,\"height\":145,\"name\":\"jiubeinv/youbi\",\"x\":1},{\"width\":88,\"y\":264,\"height\":173,\"name\":\"jiubeinv/youshou\",\"x\":188},{\"width\":78,\"y\":104,\"height\":42,\"name\":\"jiubeinv/biyan\",\"x\":526},{\"width\":73,\"y\":264,\"height\":120,\"name\":\"jiubeinv/youer\",\"x\":278},{\"width\":82,\"y\":439,\"height\":64,\"name\":\"jiubeinv/zuoer\",\"x\":157},{\"width\":74,\"y\":360,\"height\":119,\"name\":\"jiubeinv/zuoshou\",\"x\":81},{\"width\":128,\"y\":254,\"height\":224,\"name\":\"jiubeinv/zuomao\",\"x\":397},{\"width\":127,\"y\":1,\"height\":251,\"name\":\"jiubeinv/youmao\",\"x\":397}],\"width\":1024,\"height\":512,\"name\":\"jiubeinv\",\"imagePath\":\"jiubeinv_tex.png\"}",
+  "texture": "a9a14618-9120-4c69-bfa3-d85cadd20d50",
+  "subMetas": {}
+}

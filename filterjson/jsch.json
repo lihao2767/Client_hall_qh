@@ -1,0 +1,44 @@
+{
+  "1": {
+    "ID": 1,
+    "filterType": 1,
+    "selectKeyValue": "fangjian:2",
+    "filterKeyValue": "fangjian:4",
+    "Memo": "未勾选一炮多响时，不可选择一炮多响点炮做庄"
+  },
+  "2": {
+    "ID": 2,
+    "filterType": 1,
+    "selectKeyValue": "fangjian:4",
+    "filterKeyValue": "fangjian:2",
+    "Memo": null
+  },
+  "3": {
+    "ID": 3,
+    "filterType": 1,
+    "selectKeyValue": "fangjian:3",
+    "filterKeyValue": "fangjian:5",
+    "Memo": null
+  },
+  "4": {
+    "ID": 4,
+    "filterType": 1,
+    "selectKeyValue": "fangjian:5",
+    "filterKeyValue": "fangjian:3",
+    "Memo": null
+  },
+  "5": {
+    "ID": 5,
+    "filterType": 1,
+    "selectKeyValue": "gaoji:1",
+    "filterKeyValue": "gaoji:3",
+    "Memo": null
+  },
+  "6": {
+    "ID": 6,
+    "filterType": 1,
+    "selectKeyValue": "gaoji:3",
+    "filterKeyValue": "gaoji:1",
+    "Memo": null
+  }
+}

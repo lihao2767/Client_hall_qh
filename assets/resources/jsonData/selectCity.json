@@ -1,0 +1,47 @@
+{
+  "1260000": {
+    "Id": 1260000,
+    "Type": 1,
+    "Ascription": 0,
+    "Name": "奉新",
+    "Popular": 0,
+    "DefaultCity": 0,
+    "Game": "0,7,26,30,60,129,490,179,42,178",
+    "xinhua": 1,
+    "baodao": 0,
+    "Lock": 0,
+    "sansan": 0,
+    "ganzhou": 0,
+    "guosou": 0
+  },
+  "1260500": {
+    "Id": 1260500,
+    "Type": 2,
+    "Ascription": 1260000,
+    "Name": "奉新",
+    "Popular": 0,
+    "DefaultCity": 0,
+    "Game": "0,7,26,30,60,129,490,179,42,178",
+    "xinhua": 1,
+    "baodao": 0,
+    "Lock": 0,
+    "sansan": 0,
+    "ganzhou": 0,
+    "guosou": 0
+  },
+  "1260501": {
+    "Id": 1260501,
+    "Type": 3,
+    "Ascription": 1260500,
+    "Name": "奉新",
+    "Popular": 0,
+    "DefaultCity": 0,
+    "Game": "0,7,26,30,60,129,490,179,42,178",
+    "xinhua": 1,
+    "baodao": 0,
+    "Lock": 0,
+    "sansan": 0,
+    "ganzhou": 0,
+    "guosou": 0
+  }  
+}
