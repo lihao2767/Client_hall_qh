@@ -1,7 +1,7 @@
 workflows:
     ios-ipa:
         name: iOS Build IPA
-        max_build_duration: 120
+        max_build_duration: 240
         environment:
             vars:
                 COCOS_VERSION: "2.2.2"
@@ -13,44 +13,74 @@ workflows:
             - name: Download and install Cocos Creator
               script: |
                 set -e
+                COCOS_APP_TARGET="/Applications/CocosCreator.app"
+
+                # 如果已存在就跳过安装（缓存命中）
+                if [ -d "$COCOS_APP_TARGET" ]; then
+                    echo "=== Cocos Creator already installed, skipping download ==="
+                    COCOS_PATH=$(find "$COCOS_APP_TARGET/Contents/MacOS/" -maxdepth 1 -type f | head -1)
+                    echo "COCOS_PATH=$COCOS_PATH" >> $CM_ENV
+                    echo "Cocos path: $COCOS_PATH"
+                    exit 0
+                fi
+
                 echo "=== Downloading Cocos Creator ${COCOS_VERSION} ==="
-                curl -L -o /tmp/cocos.dmg \
+                # 尝试多个镜像源
+                DOWNLOAD_SUCCESS=0
+                
+                # 镜像 1：官方源
+                echo "Trying official source..."
+                if curl -L -o /tmp/cocos.dmg \
                     "https://digitalocean.cocos2d-x.org/CocosCreator/v2.2.2/CocosCreator_v2.2.2_20191227_mac.dmg" \
-                    --retry 3 --retry-delay 5
+                    --retry 2 --retry-delay 3 --connect-timeout 30 --max-time 600 -k 2>/dev/null; then
+                    DOWNLOAD_SUCCESS=1
+                fi
+
+                # 镜像 2：Cocos 官方 CDN
+                if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
+                    echo "Trying Cocos CDN..."
+                    if curl -L -o /tmp/cocos.dmg \
+                        "http://cocos2d-x.org/filedown/CocosCreator_v2.2.2_20191227_mac.dmg" \
+                        --retry 2 --retry-delay 3 --connect-timeout 30 --max-time 600 2>/dev/null; then
+                        DOWNLOAD_SUCCESS=1
+                    fi
+                fi
+
+                # 镜像 3：GitHub Release（如果有）
+                if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
+                    echo "ERROR: All download sources failed"
+                    exit 1
+                fi
+
+                echo "Download successful!"
                 ls -lh /tmp/cocos.dmg
 
                 echo "=== Mounting dmg ==="
                 hdiutil attach /tmp/cocos.dmg -nobrowse -quiet
                 sleep 3
 
-                echo "=== Listing mounted volumes ==="
-                ls -la /Volumes/
-
                 echo "=== Looking for Cocos app ==="
                 COCOS_APP=$(find /Volumes/ -maxdepth 3 -name "*.app" 2>/dev/null | grep -i cocos | head -1)
                 if [ -z "$COCOS_APP" ]; then
-                    echo "ERROR: Cannot find Cocos Creator app in any mounted volume"
-                    find /Volumes/ -maxdepth 3 2>/dev/null
+                    echo "ERROR: Cannot find Cocos Creator app in mounted volume"
+                    ls -la /Volumes/
                     exit 1
                 fi
-                echo "Found app: $COCOS_APP"
+                echo "Found: $COCOS_APP"
 
                 echo "=== Copying to Applications ==="
                 cp -R "$COCOS_APP" /Applications/
 
-                COCOS_BASENAME=$(basename "$COCOS_APP")
-                COCOS_APP_TARGET="/Applications/${COCOS_BASENAME}"
-                echo "Installed at: $COCOS_APP_TARGET"
-
                 echo "=== Unmounting dmg ==="
                 VOLUME_PATH=$(dirname "$COCOS_APP")
                 hdiutil detach "$VOLUME_PATH" -quiet || true
+                rm -f /tmp/cocos.dmg
 
                 echo "=== Finding Cocos executable ==="
-                ls "${COCOS_APP_TARGET}/Contents/MacOS/"
-                COCOS_PATH=$(find "${COCOS_APP_TARGET}/Contents/MacOS/" -maxdepth 1 -type f | head -1)
+                COCOS_PATH=$(find "$COCOS_APP_TARGET/Contents/MacOS/" -maxdepth 1 -type f | head -1)
                 if [ -z "$COCOS_PATH" ]; then
                     echo "ERROR: Cannot find Cocos Creator executable"
+                    ls "$COCOS_APP_TARGET/Contents/MacOS/"
                     exit 1
                 fi
                 echo "COCOS_PATH=$COCOS_PATH" >> $CM_ENV
@@ -62,12 +92,49 @@ workflows:
                 echo "=== Starting Cocos Creator iOS build ==="
                 echo "Project path: $CM_BUILD_DIR"
                 echo "Cocos path: $COCOS_PATH"
+                echo "Start time: $(date)"
 
+                # 关键：防止 GUI 弹窗交互阻塞
+                export DISPLAY=""
+                export QT_QPA_PLATFORM="offscreen"
+
+                # 后台运行 Cocos Creator，并设置 90 分钟超时
                 "$COCOS_PATH" \
                     --path "$CM_BUILD_DIR" \
                     --build "platform=ios;debug=false;template=default;md5Cache=false;encryptJs=true;xxteaKey=df124dde-c814-4b" \
-                    2>&1 | tee /tmp/cocos-build.log
+                    < /dev/null \
+                    > /tmp/cocos-build.log 2>&1 &
 
+                COCOS_PID=$!
+                echo "Cocos Creator PID: $COCOS_PID"
+
+                # 每 60 秒打印一次日志，最多等待 90 分钟
+                TIMEOUT=5400
+                ELAPSED=0
+                while kill -0 $COCOS_PID 2>/dev/null; do
+                    sleep 60
+                    ELAPSED=$((ELAPSED + 60))
+                    echo "=== Still building... ${ELAPSED}s elapsed ==="
+                    tail -5 /tmp/cocos-build.log 2>/dev/null || true
+                    if [ $ELAPSED -ge $TIMEOUT ]; then
+                        echo "ERROR: Cocos Creator build timed out after ${TIMEOUT}s"
+                        kill -9 $COCOS_PID 2>/dev/null || true
+                        cat /tmp/cocos-build.log
+                        exit 1
+                    fi
+                done
+
+                wait $COCOS_PID
+                EXIT_CODE=$?
+                echo "=== Cocos Creator finished with exit code: $EXIT_CODE ==="
+                cat /tmp/cocos-build.log
+
+                if [ $EXIT_CODE -ne 0 ]; then
+                    echo "ERROR: Cocos Creator build failed"
+                    exit 1
+                fi
+
+                echo "End time: $(date)"
                 echo "=== Build completed, listing output ==="
                 find "$CM_BUILD_DIR/build" -name "*.xcodeproj" -maxdepth 6 2>/dev/null || echo "No xcodeproj found"
                 ls -la "$CM_BUILD_DIR/build/" 2>/dev/null || echo "No build directory"
@@ -168,6 +235,7 @@ workflows:
                 APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -maxdepth 5 | head -1)
                 if [ -z "$APP_PATH" ]; then
                     echo "ERROR: Cannot find .app in archive"
+                    cat /tmp/archive.log
                     exit 1
                 fi
                 echo "Found app: $APP_PATH"
@@ -184,6 +252,6 @@ workflows:
                 ls -lh "$EXPORT_DIR/${APP_NAME}.ipa"
 
         artifacts:
-            - export/*.ipa
+            - $CM_BUILD_DIR/export/*.ipa
             - /tmp/cocos-build.log
             - /tmp/archive.log
