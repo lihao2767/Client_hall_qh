@@ -1,0 +1,270 @@
+---
+format_version: '11'
+default_step_source_repository: https://github.com/bitrise-io/bitrise-steplib.git
+project_type: ios
+workflows:
+  ios-build:
+    title: iOS Build with Cocos Creator
+    envs:
+      - opts:
+          is_expand: false
+        PLATFORM: ios
+      - opts:
+          is_expand: false
+        COCOS_VERSION: "2.2.2"
+      - opts:
+          is_expand: false
+        CONFIGURATION: Release
+      - opts:
+          is_expand: false
+        BUNDLE_ID: "com.xiuxian.game"
+      - opts:
+          is_expand: false
+        XXTEA_KEY: "df124dde-c814-4b"
+    steps:
+      - git-clone@8: {}
+      - cache-pull@2: {}
+      - script@1:
+        title: Install Cocos Creator (if not cached)
+        inputs:
+          - content: |-
+            #!/usr/bin/env bash
+            set -e
+            
+            COCOS_PATH="/Applications/CocosCreator.app/Contents/MacOS/CocosCreator"
+            
+            if [ -f "$COCOS_PATH" ]; then
+                echo "Cocos Creator already installed from cache"
+                echo "COCOS_PATH=$COCOS_PATH" >> "$BITRISE_ENV_JSON"
+                exit 0
+            fi
+            
+            echo "Cocos Creator not found, downloading..."
+            echo "Downloading Cocos Creator ${COCOS_VERSION}..."
+            
+            curl -L -o /tmp/cocos.dmg \
+                "https://download.cocos.com/CocosCreator/v2.2.2/CocosCreator_v2.2.2_mac.dmg" \
+                --retry 3 --retry-delay 5
+            
+            echo "Mounting DMG..."
+            hdiutil attach /tmp/cocos.dmg -nobrowse -quiet
+            sleep 3
+            
+            echo "Installing to Applications..."
+            cp -R /tmp/cocos-mount/CocosCreator.app /Applications/
+            
+            echo "Unmounting DMG..."
+            hdiutil detach /tmp/cocos-mount -quiet
+            
+            echo "Cleaning up..."
+            rm /tmp/cocos.dmg
+            
+            echo "Cocos Creator installed successfully"
+            echo "COCOS_PATH=/Applications/CocosCreator.app/Contents/MacOS/CocosCreator"
+            
+      - script@1:
+        title: Build iOS with Cocos Creator
+        inputs:
+          - content: |-
+            #!/usr/bin/env bash
+            set -e
+            
+            COCOS_PATH="/Applications/CocosCreator.app/Contents/MacOS/CocosCreator"
+            BUILD_DIR="$BITRISE_DEPLOY_DIR"
+            
+            echo "=== Starting Cocos Creator iOS build ==="
+            echo "Project path: $BITRISE_SOURCE_DIR"
+            echo "Cocos path: $COCOS_PATH"
+            echo "Build started at: $(date)"
+            echo "Machine architecture: $(uname -m)"
+            
+            # Verify Cocos Creator binary
+            file "$COCOS_PATH"
+            
+            # Kill any existing Cocos Creator processes
+            pkill -9 -f CocosCreator 2>/dev/null || true
+            sleep 2
+            
+            # Set environment variables to prevent GUI interactions
+            export DISPLAY=""
+            export QT_QPA_PLATFORM="offscreen"
+            export QT_PLUGIN_PATH=""
+            
+            # Run Cocos Creator build in background
+            echo "=== Running Cocos Creator build ==="
+            "$COCOS_PATH" \
+                --path "$BITRISE_SOURCE_DIR" \
+                --build "platform=ios;debug=false;template=default;md5Cache=false;encryptJs=true;xxteaKey=${XXTEA_KEY}" \
+                < /dev/null \
+                > /tmp/cocos-full.log 2>&1 &
+            COCOS_PID=$!
+            
+            echo "Cocos Creator started with PID: $COCOS_PID"
+            
+            # Monitor with timeout (120 minutes)
+            TIMEOUT=7200
+            ELAPSED=0
+            while kill -0 $COCOS_PID 2>/dev/null; do
+                if [ $ELAPSED -ge $TIMEOUT ]; then
+                    echo "ERROR: Build timed out after $TIMEOUT seconds"
+                    tail -50 /tmp/cocos-full.log
+                    kill -9 $COCOS_PID 2>/dev/null || true
+                    exit 1
+                fi
+                
+                # Print progress every 2 minutes
+                if [ $((ELAPSED % 120)) -eq 0 ]; then
+                    echo "[$((ELAPSED/60))m $((ELAPSED%60))s] Build still running..."
+                    tail -10 /tmp/cocos-full.log 2>/dev/null || true
+                fi
+                
+                sleep 60
+                ELAPSED=$((ELAPSED + 60))
+            done
+            
+            echo "=== Build completed at: $(date) ==="
+            echo "Process exited with status: $?"
+            echo "=== Build log (last 100 lines) ==="
+            tail -100 /tmp/cocos-full.log
+            
+            # Save log
+            cp /tmp/cocos-full.log "$BUILD_DIR/cocos-build.log"
+            
+            echo "=== Build output ==="
+            ls -la "$BITRISE_SOURCE_DIR/build/" 2>/dev/null || echo "No build directory"
+            
+      - script@1:
+        title: Locate Xcode Project
+        inputs:
+          - content: |-
+            #!/usr/bin/env bash
+            set -e
+            
+            SOURCE_DIR="$BITRISE_SOURCE_DIR"
+            
+            echo "=== Searching for Xcode project ==="
+            
+            PROJECT_DIR=$(find "$SOURCE_DIR/build" -name "*.xcodeproj" -type d 2>/dev/null | head -1)
+            
+            if [ -z "$PROJECT_DIR" ]; then
+                echo "ERROR: No Xcode project found"
+                ls -laR "$SOURCE_DIR/build/" 2>/dev/null | head -100
+                exit 1
+            fi
+            
+            echo "Found project: $PROJECT_DIR"
+            echo "XCODE_PROJECT=$PROJECT_DIR/project.pbxproj" >> "$BITRISE_ENV_JSON"
+            echo "XCODE_SCHEME=hall_split-mobile" >> "$BITRISE_ENV_JSON"
+            
+      - script@1:
+        title: Inject iOS Permissions
+        inputs:
+          - content: |-
+            #!/usr/bin/env bash
+            set -e
+            
+            SOURCE_DIR="$BITRISE_SOURCE_DIR"
+            
+            # Find Info.plist
+            INFO_PLIST=$(find "$SOURCE_DIR/build" -name "Info.plist" -maxdepth 10 2>/dev/null | head -1)
+            
+            if [ -z "$INFO_PLIST" ] || [ ! -f "$INFO_PLIST" ]; then
+                echo "WARNING: Info.plist not found, skipping permission injection"
+                exit 0
+            fi
+            
+            echo "Info.plist: $INFO_PLIST"
+            
+            # Helper function
+            add_or_set_plist_key() {
+                local key="$1"
+                local value="$2"
+                if /usr/libexec/PlistBuddy -c "Print :$key" "$INFO_PLIST" 2>/dev/null; then
+                    /usr/libexec/PlistBuddy -c "Set :$key \"$value\"" "$INFO_PLIST"
+                else
+                    /usr/libexec/PlistBuddy -c "Add :$key string \"$value\"" "$INFO_PLIST"
+                fi
+            }
+            
+            # Add permissions
+            add_or_set_plist_key "NSLocationWhenInUseUsageDescription" "用于高德地图定位服务"
+            add_or_set_plist_key "NSLocationAlwaysAndWhenInUseUsageDescription" "用于后台高德地图定位服务"
+            add_or_set_plist_key "NSCameraUsageDescription" "需要使用相机功能"
+            add_or_set_plist_key "NSPhotoLibraryUsageDescription" "需要访问相册"
+            add_or_set_plist_key "NSPhotoLibraryAddUsageDescription" "需要保存图片到相册"
+            add_or_set_plist_key "NSMicrophoneUsageDescription" "需要使用麦克风录音"
+            
+            echo "=== Info.plist updated ==="
+            
+      - xcode-builder@3:
+        title: Build unsigned IPA
+        inputs:
+          - project_path: "$XCODE_PROJECT"
+          - scheme: "$XCODE_SCHEME"
+          - configuration: "$CONFIGURATION"
+          - export_method: ad-hoc
+          - code_signing_identity: ""
+          - provisioning_profile_path: ""
+          - export_options: |
+              method: ad-hoc
+              signingStyle: manual
+          - should_archive: "no"
+          - derived_data_path: "$BITRISE_DEPLOY_DIR/derived-data"
+      - script@1:
+        title: Create IPA File
+        inputs:
+          - content: |-
+            #!/usr/bin/env bash
+            set -e
+            
+            SOURCE_DIR="$BITRISE_SOURCE_DIR"
+            DEPLOY_DIR="$BITRISE_DEPLOY_DIR"
+            
+            echo "=== Creating IPA file ==="
+            
+            # Find the .app file
+            APP_PATH=$(find "$DEPLOY_DIR/derived-data" -name "*.app" -maxdepth 5 2>/dev/null | head -1)
+            
+            if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+                echo "ERROR: .app not found in derived-data"
+                find "$DEPLOY_DIR/derived-data" -name "*.app" 2>/dev/null
+                exit 1
+            fi
+            
+            echo "Found app: $APP_PATH"
+            APP_NAME=$(basename "$APP_PATH" .app)
+            
+            # Create Payload directory
+            PAYLOAD_DIR="$DEPLOY_DIR/Payload"
+            mkdir -p "$PAYLOAD_DIR"
+            cp -R "$APP_PATH" "$PAYLOAD_DIR/"
+            
+            # Create IPA
+            cd "$DEPLOY_DIR"
+            zip -qr "${APP_NAME}.ipa" Payload/
+            cd -
+            
+            echo "=== IPA created ==="
+            ls -lh "$DEPLOY_DIR/${APP_NAME}.ipa"
+            
+            # Set environment variable for deploy step
+            echo "IPA_FILE=$DEPLOY_DIR/${APP_NAME}.ipa" >> "$BITRISE_ENV_JSON"
+            
+      - deploy-to-file-system@0:
+        title: Deploy IPA and Logs
+        inputs:
+          - archive_path: "$IPA_FILE"
+          - target_dir: "$BITRISE_DEPLOY_DIR"
+      - cache-push@2:
+        title: Push Cache (Cocos Creator)
+        inputs:
+          - path: /Applications/CocosCreator.app
+          - key: cocos-creator-${COCOS_VERSION}-mac
+            
+deployments:
+  ipa-deployment:
+    name: iOS IPA
+    title: IPA
+    opt_in_output_files:
+      - "$BITRISE_DEPLOY_DIR/*.ipa"
+      - "$BITRISE_DEPLOY_DIR/*.log"
