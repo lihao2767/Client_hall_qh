@@ -2,14 +2,20 @@ workflows:
     ios-ipa:
         name: iOS Build IPA
         max_build_duration: 120
+        instance_type: mac_mini_m1
         environment:
             vars:
                 COCOS_VERSION: "2.2.2"
                 CONFIGURATION: "Release"
                 BUNDLE_ID: "com.xiuxian.game"
+                COCOAPODS_DISABLE_STATS: "true"
             groups:
                 - default
         scripts:
+            - name: Accept Xcode License
+              script: |
+                sudo xcodebuild -license accept || true
+                
             - name: Download and install Cocos Creator
               script: |
                 set -e
@@ -46,7 +52,6 @@ workflows:
                     fi
                 fi
 
-                # 镜像 3：GitHub Release（如果有）
                 if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
                     echo "ERROR: All download sources failed"
                     exit 1
@@ -83,6 +88,10 @@ workflows:
                     ls "$COCOS_APP_TARGET/Contents/MacOS/"
                     exit 1
                 fi
+                
+                # 给予执行权限
+                chmod +x "$COCOS_PATH"
+                
                 echo "COCOS_PATH=$COCOS_PATH" >> $CM_ENV
                 echo "=== Cocos Creator installed: $COCOS_PATH ==="
 
@@ -94,42 +103,93 @@ workflows:
                 echo "Cocos path: $COCOS_PATH"
                 echo "Start time: $(date)"
 
-                # 关键：防止 GUI 弹窗交互阻塞
-                export DISPLAY=""
-                export QT_QPA_PLATFORM="offscreen"
+                # 检查项目配置文件
+                if [ ! -f "$CM_BUILD_DIR/project.json" ]; then
+                    echo "ERROR: project.json not found in $CM_BUILD_DIR"
+                    ls -la "$CM_BUILD_DIR"
+                    exit 1
+                fi
 
-                # 后台运行 Cocos Creator，并设置 90 分钟超时
-                "$COCOS_PATH" \
-                    --path "$CM_BUILD_DIR" \
+                # 清理旧的构建缓存
+                rm -rf "$CM_BUILD_DIR/build/jsb-default" || true
+                rm -rf "$CM_BUILD_DIR/build/jsb-link" || true
+
+                # 写构建脚本到临时文件
+                BUILD_SCRIPT=/tmp/cocos_build.sh
+                cat > $BUILD_SCRIPT << 'SCRIPT_EOF'
+                #!/bin/bash
+                /Applications/CocosCreator.app/Contents/MacOS/CocosCreator \
+                    --path "$1" \
                     --build "platform=ios;debug=false;template=default;md5Cache=false;encryptJs=true;xxteaKey=df124dde-c814-4b" \
-                    < /dev/null \
-                    > /tmp/cocos-build.log 2>&1 &
+                    > /tmp/cocos-build.log 2>&1
+                echo $? > /tmp/cocos_exit_code
+                SCRIPT_EOF
+                chmod +x $BUILD_SCRIPT
 
-                COCOS_PID=$!
-                echo "Cocos Creator PID: $COCOS_PID"
+                # 关键：使用 launchctl 在 GUI session 中运行，解决 WindowServer 依赖问题
+                echo "=== Launching Cocos Creator in GUI session ==="
+                PLIST_FILE="/tmp/com.cocos.builder.plist"
+                cat > $PLIST_FILE << PLIST_EOF
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                <plist version="1.0">
+                <dict>
+                    <key>Label</key>
+                    <string>com.cocos.builder</string>
+                    <key>ProgramArguments</key>
+                    <array>
+                        <string>/Applications/CocosCreator.app/Contents/MacOS/CocosCreator</string>
+                        <string>--path</string>
+                        <string>$CM_BUILD_DIR</string>
+                        <string>--build</string>
+                        <string>platform=ios;debug=false;template=default;md5Cache=false;encryptJs=true;xxteaKey=df124dde-c814-4b</string>
+                    </array>
+                    <key>StandardOutPath</key>
+                    <string>/tmp/cocos-build.log</string>
+                    <key>StandardErrorPath</key>
+                    <string>/tmp/cocos-build.log</string>
+                    <key>RunAtLoad</key>
+                    <true/>
+                </dict>
+                </plist>
+                PLIST_EOF
 
-                # 每 60 秒打印一次日志，最多等待 100 分钟
-                TIMEOUT=6000
+                # 用 launchctl 在 bootstrap session（GUI session）中运行
+                GUI_UID=$(id -u)
+                launchctl bootstrap gui/$GUI_UID $PLIST_FILE || true
+                sleep 5
+
+                echo "=== Monitoring build progress ==="
+                TIMEOUT=5400
                 ELAPSED=0
-                while kill -0 $COCOS_PID 2>/dev/null; do
+                while true; do
                     sleep 60
                     ELAPSED=$((ELAPSED + 60))
                     echo "=== Still building... ${ELAPSED}s elapsed ==="
                     tail -5 /tmp/cocos-build.log 2>/dev/null || true
+
+                    # 检查是否完成（日志中出现完成标志）
+                    if grep -q "Builder Finished\|build success\|error occurred\|Error:" /tmp/cocos-build.log 2>/dev/null; then
+                        echo "=== Build finished! ==="
+                        break
+                    fi
+
                     if [ $ELAPSED -ge $TIMEOUT ]; then
                         echo "ERROR: Cocos Creator build timed out after ${TIMEOUT}s"
-                        kill -9 $COCOS_PID 2>/dev/null || true
+                        launchctl bootout gui/$GUI_UID/com.cocos.builder 2>/dev/null || true
                         cat /tmp/cocos-build.log
                         exit 1
                     fi
                 done
 
-                wait $COCOS_PID
-                EXIT_CODE=$?
-                echo "=== Cocos Creator finished with exit code: $EXIT_CODE ==="
+                # 卸载 launchd job
+                launchctl bootout gui/$GUI_UID/com.cocos.builder 2>/dev/null || true
+
+                echo "=== Full build log ==="
                 cat /tmp/cocos-build.log
 
-                if [ $EXIT_CODE -ne 0 ]; then
+                # 检查是否有错误
+                if grep -q "error occurred\|Error:" /tmp/cocos-build.log 2>/dev/null; then
                     echo "ERROR: Cocos Creator build failed"
                     exit 1
                 fi
@@ -147,8 +207,10 @@ workflows:
                 PROJECT_FILE=$(find "$CM_BUILD_DIR/build" -name "*.xcodeproj" -maxdepth 6 | head -1)
                 if [ -z "$PROJECT_FILE" ]; then
                     echo "ERROR: No Xcode project found"
-                    ls -la "$CM_BUILD_DIR/build/" 2>/dev/null
-                    find "$CM_BUILD_DIR/build" -maxdepth 6 -type d 2>/dev/null
+                    echo "=== Searching in all subdirectories ==="
+                    find "$CM_BUILD_DIR/build" -type d -name "*.xcodeproj" 2>/dev/null || true
+                    echo "=== All files in build directory ==="
+                    find "$CM_BUILD_DIR/build" -maxdepth 6 -type f 2>/dev/null | head -50
                     exit 1
                 fi
                 echo "XCODE_PROJECT=$PROJECT_FILE" >> $CM_ENV
