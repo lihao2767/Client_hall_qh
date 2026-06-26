@@ -1,7 +1,7 @@
 workflows:
     ios-ipa:
         name: iOS Build IPA
-        max_build_duration: 240
+        max_build_duration: 120
         environment:
             vars:
                 COCOS_VERSION: "2.2.2"
@@ -108,8 +108,8 @@ workflows:
                 COCOS_PID=$!
                 echo "Cocos Creator PID: $COCOS_PID"
 
-                # 每 60 秒打印一次日志，最多等待 90 分钟
-                TIMEOUT=5400
+                # 每 60 秒打印一次日志，最多等待 100 分钟
+                TIMEOUT=6000
                 ELAPSED=0
                 while kill -0 $COCOS_PID 2>/dev/null; do
                     sleep 60
